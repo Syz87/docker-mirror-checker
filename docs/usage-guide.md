@@ -121,10 +121,133 @@ GHCR 镜像的 API 支持有限，建议：
    docker pull ghcr.io/owner/repo:latest
    ```
 
-3. **使用 DockerTarBuilder 自建**
-   - Fork [DockerTarBuilder](https://github.com/wukongdaily/DockerTarBuilder)
-   - 触发工作流构建镜像
-   - 下载并导入
+---
+
+## 场景六：从源码构建镜像
+
+当需要最新代码或自定义修改时，必须从源码构建。
+
+### 方案 B1：本地 Docker Build
+
+```bash
+# 克隆项目
+git clone https://github.com/owner/repo.git
+cd repo
+
+# 构建镜像
+docker build -t my-image:latest .
+
+# 或使用 docker-compose
+docker compose build
+docker compose up -d
+```
+
+**适用场景：**
+- ✅ 单机部署、快速测试
+- ✅ 需要修改源码
+- ✅ 需要自定义配置
+
+### 方案 B2：GitHub Actions 自动构建
+
+在项目中添加 `.github/workflows/docker-build.yml`：
+
+```yaml
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+```
+
+**适用场景：**
+- ✅ 多人协作、CI/CD
+- ✅ 需要自动构建
+- ✅ 需要多架构支持
+
+### 方案 B3：多阶段构建（优化镜像大小）
+
+```dockerfile
+# 第一阶段：构建
+FROM python:3.11-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --user -r requirements.txt
+COPY . .
+RUN python -m py_compile main.py
+
+# 第二阶段：运行
+FROM python:3.11-slim
+WORKDIR /app
+COPY --from=builder /root/.local /root/.local
+COPY --from=builder /app .
+ENV PATH=/root/.local/bin:$PATH
+CMD ["python", "main.py"]
+```
+
+**适用场景：**
+- ✅ 需要优化镜像大小
+- ✅ 生产环境部署
+- ✅ 安全敏感场景
+
+---
+
+## 场景七：内网环境离线传输
+
+当内网环境无法直接访问外网时，使用 DockerTarBuilder 打包镜像。
+
+### ⚠️ 重要说明
+
+DockerTarBuilder **只能拉取已有镜像并打包**，**不能从源码构建**。
+
+### 使用步骤
+
+1. **Fork DockerTarBuilder 仓库**
+   ```bash
+   # 在 GitHub 上 fork wukongdaily/DockerTarBuilder
+   ```
+
+2. **触发工作流**
+   - 进入 Actions 页面
+   - 选择对应架构的工作流
+   - 输入镜像名称
+
+3. **下载并导入镜像**
+   ```bash
+   # 下载 Release 中的 tar.gz 文件
+   wget https://github.com/<你的用户名>/DockerTarBuilder/releases/download/DockerTarBuilder-AMD64/nginx_latest-amd64.tar.gz
+   
+   # 导入 Docker
+   docker load -i nginx_latest-amd64.tar.gz
+   
+   # 验证
+   docker images | grep nginx
+   ```
 
 ---
 
@@ -143,7 +266,8 @@ GHCR 镜像的 API 支持有限，建议：
    - `ghcr.io`
 
 3. **自建镜像**
-   - 使用 DockerTarBuilder
+   - 从源码构建（方案 B）
+   - DockerTarBuilder 打包（方案 C）
 
 ### 2. 版本锁定
 
@@ -175,6 +299,18 @@ python3 check_mirrors.py nginx:latest
 curl -sL "https://docker.aityp.com/api/v1/image?search=nginx&platform=linux/arm64" | python3 -m json.tool
 ```
 
+### 5. 选择正确的方案
+
+根据需求选择合适的方案：
+
+| 需求 | 推荐方案 |
+|------|----------|
+| 镜像站有最新版 | 方案 A：镜像站拉取 |
+| 需要最新代码 | 方案 B：从源码构建 |
+| 需要自定义修改 | 方案 B：从源码构建 |
+| 内网环境 | 方案 C：DockerTarBuilder 打包 |
+| 只是镜像站没同步 | 等待同步 |
+
 ---
 
 ## 常见问题
@@ -190,7 +326,12 @@ A: 可能的原因：
 
 A: 这是正常现象，镜像站需要时间同步。可以：
 - 等待镜像站同步
-- 使用 DockerTarBuilder 自建镜像
+- 从源码构建（方案 B）
+- 使用 DockerTarBuilder 打包（方案 C）
+
+### Q: DockerTarBuilder 能从源码构建吗？
+
+A: 不能。DockerTarBuilder 只能拉取已有镜像并打包，不能修改镜像内容。如果需要从源码构建，请使用方案 B。
 
 ### Q: 如何贡献代码？
 
